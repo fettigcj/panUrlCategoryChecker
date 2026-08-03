@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL Category Results</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    table { font-size: 0.95em; }
+    td, th { white-space: nowrap; }
+    td.url { max-width: 520px; white-space: normal; }
+    .ok { color: #0a0; }
+    .err { color: #b00; }
+    .container { max-width: 1200px; margin: 2rem auto; }
+    details pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Results</h1>
+    <p><a href="/">Back</a> • Firewalls available: {{ fw_count }}</p>
+
+    {% if errors and errors|length %}
+    <article class="err">
+      <header>Errors</header>
+      <ul>
+        {% for e in errors %}
+        <li>{{ e }}</li>
+        {% endfor %}
+      </ul>
+    </article>
+    {% endif %}
+
+    <table role="grid">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>URL</th>
+          <th>Category</th>
+          <th>Firewall</th>
+          <th>Status</th>
+          <th>Raw</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="url">{{ r.url }}</td>
+          <td>{{ r.category }}</td>
+          <td>{{ r.firewall }}</td>
+          <td>{% if r.ok %}<span class="ok">OK</span>{% else %}<span class="err">Error</span>{% endif %}</td>
+          <td>
+            {% if r.raw %}
+              <details>
+                <summary>XML</summary>
+                <pre>{{ r.raw }}</pre>
+              </details>
+            {% elif r.error %}
+              <details open>
+                <summary>Error</summary>
+                <pre>{{ r.error }}</pre>
+              </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

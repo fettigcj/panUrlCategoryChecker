@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.tmp
+*.log
+*.coverage
+
+# Virtual environments / local interpreters
+.env
+.venv/
+venv/
+ENV/
+Scripts/
+pyvenv.cfg
+
+# IDEs/editors
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flask instance folder
+instance/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Submodule metadata
+.pythonsubmodules/

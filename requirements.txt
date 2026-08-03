@@ -1,0 +1,3 @@
+Flask>=3.0
+pan-os-python>=1.12
+# lxml is optional; using stdlib xml.etree for now

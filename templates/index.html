@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL Category Checker</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    textarea { min-height: 240px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .muted { color: #666; font-size: 0.9em; }
+    .container { max-width: 960px; margin: 2rem auto; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>URL Category Checker</h1>
+    <p class="muted">Paste one URL per line. The app will validate and distribute checks across {{ fw_count }} firewall(s).
+    Missing scheme defaults to http://</p>
+
+    <form method="post" action="/check">
+      <label for="urls">URLs (one per line)</label>
+      <textarea id="urls" name="urls" placeholder="example.com\nhttps://www.paloaltonetworks.com\nhttp://news.example.org/path?x=1"></textarea>
+      <div>
+        <button type="submit">Check categories</button>
+      </div>
+    </form>
+  </main>
+</body>
+</html>
