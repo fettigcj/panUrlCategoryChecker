@@ -7,15 +7,9 @@ import xml.etree.ElementTree as ET
 
 from flask import Flask, render_template, request
 
-# Make the pancore submodule importable if not installed as a package
-# Upstream repo layout is pancore/ (submodule root) -> pancore/ (repo folder) -> pancore/ (python package)
-# We add the middle level to sys.path so that `import pancore` resolves to the inner python package.
-SUBMODULE_PATH = os.path.join(os.path.dirname(__file__), 'pancore', 'pancore')
-if os.path.isdir(SUBMODULE_PATH) and SUBMODULE_PATH not in sys.path:
-    sys.path.insert(0, SUBMODULE_PATH)
-
+# Optional import of pancore package (provided via submodule at ./pancore)
 try:
-    import pancore  # noqa: F401  # reserved for future shared helpers
+    import pancore  # noqa: F401
 except Exception:
     pancore = None  # optional; app can still run without importing from pancore directly
 

@@ -74,3 +74,24 @@ Notes
 - The app attempts to parse categories from the op command response using a best-effort XML parser. Adjust parsing if your PAN-OS version returns a different structure.
 - Set UCC_MAX_WORKERS and UCC_REQUEST_TIMEOUT env vars to tune concurrency and timeouts.
 - If pancore is published to PyPI or a private index, you may uninstall the submodule and depend on the package instead.
+
+
+Submodule notes
+----------------
+- This repo vendors pancore as a Git submodule at `./pancore` pointing to `https://github.com/fettigcj/pancore.git` (branch `main`).
+- The upstream now contains only the minimal package files; no `panInventory` content is included here.
+
+Common commands:
+- Initializing after clone:
+  git submodule update --init --recursive
+- Updating to the latest upstream commit on `main`:
+  git submodule update --remote --merge
+  git add pancore
+  git commit -m "Update pancore submodule to latest main"
+  git push
+
+If you need to refresh completely (rare):
+  git submodule deinit -f pancore
+  git rm -f pancore
+  git submodule add -b main https://github.com/fettigcj/pancore.git pancore
+  git commit -m "Re-add pancore submodule cleanly"
