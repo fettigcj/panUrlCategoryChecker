@@ -27,7 +27,9 @@ Setup
    pip install -r requirements.txt
 
 3) Configure firewalls (CLI recommended)
-   - Run the interactive wizard:
+   - Easiest: run with no arguments to enter interactive mode:
+     python ucc_config_cli.py
+   - Or run the explicit interactive wizard:
      python ucc_config_cli.py init
    - Or set fields non-interactively:
      python ucc_config_cli.py set --username APIUSER --password APIPASS --port 443 --no-verify-ssl \
@@ -35,8 +37,9 @@ Setup
    - Validate and view:
      python ucc_config_cli.py validate
      python ucc_config_cli.py show
-   - Alternatively, you can still copy config/panCoreConfig.json.example to config/panCoreConfig.json and edit manually,
-     or set environment variable PANCORE_CONFIG to point to your JSON file elsewhere
+   - Config path: by default we assume ./config/panCoreConfig.json unless overridden.
+     Use -c/--conffile to specify a path, or set environment variable PANCORE_CONFIG.
+   - Alternatively, you can still copy config/panCoreConfig.json.example to config/panCoreConfig.json and edit manually
 
    Example JSON:
    {

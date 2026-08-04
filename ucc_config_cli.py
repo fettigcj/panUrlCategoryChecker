@@ -83,14 +83,23 @@ Default path resolution:
 """.strip()
 
 
+def resolve_config_path(args: argparse.Namespace | None) -> str:
+    # Prefer explicit CLI flag --conffile/-c, then legacy --path, else env/default
+    if args is not None:
+        path = getattr(args, "conffile", None) or getattr(args, "path", None)
+        if path:
+            return path
+    return default_config_path()
+
+
 def cmd_show(args: argparse.Namespace) -> int:
-    path = args.path or default_config_path()
+    path = resolve_config_path(args)
     data = load_config(path)
     if not data:
         print(f"No config found at {path}")
         return 1
     out = json.loads(json.dumps(data))  # deep-ish copy
-    if not args.show_secret:
+    if not getattr(args, "show_secret", False):
         try:
             if "api" in out and "password" in out["api"]:
                 out["api"]["password"] = "***"
@@ -118,7 +127,7 @@ def parse_devices_list(dev_items: List[str]) -> List[Dict[str, Any]]:
 
 
 def cmd_set(args: argparse.Namespace) -> int:
-    path = args.path or default_config_path()
+    path = resolve_config_path(args)
     cfg = load_config(path)
     if not isinstance(cfg.get("api"), dict):
         cfg["api"] = {}
@@ -153,7 +162,7 @@ def cmd_set(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    path = args.path or default_config_path()
+    path = resolve_config_path(args)
     cfg = load_config(path)
     errs = validate_config(cfg)
     if errs:
@@ -166,8 +175,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    path = args.path or default_config_path()
-    print("Initializing configuration...")
+    path = resolve_config_path(args)
+    print(f"Initializing configuration at {path}...")
     username = input("API Username: ")
     password = getpass("API Password: ")
     port_in = input("API Port [443]: ").strip() or "443"
@@ -205,9 +214,11 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="URL Category Checker configuration utility", epilog=essay)
-    p.add_argument("--path", help="Path to panCoreConfig.json (overrides PANCORE_CONFIG/default)")
+    # Keep --path for backward compatibility; prefer -c/--conffile like panInventory
+    p.add_argument("-c", "--conffile", help="Path to panCoreConfig.json (overrides PANCORE_CONFIG/default)")
+    p.add_argument("--path", help=argparse.SUPPRESS)
 
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=False)
 
     s_show = sub.add_parser("show", help="Display current configuration (password redacted by default)")
     s_show.add_argument("--show-secret", action="store_true", help="Show api.password in clear text")
@@ -232,9 +243,92 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _prompt_bool(prompt: str, default: bool = False) -> bool:
+    suf = "Y/n" if default else "y/N"
+    ans = input(f"{prompt} [{suf}]: ").strip().lower()
+    if not ans:
+        return default
+    return ans in ("y", "yes", "true", "1")
+
+
+def interactive_menu() -> int:
+    # Default path resolution mirrors panInventory style: assume panCoreConfig.json unless overridden.
+    default_path = default_config_path()
+    print("URL Category Checker — Config Utility")
+    print("No arguments provided; entering interactive mode. Press Ctrl+C to exit at any time.\n")
+    while True:
+        print(f"Current config file: {default_path}")
+        print("Select an action:")
+        print("  1) Init configuration (interactive wizard)")
+        print("  2) Validate configuration")
+        print("  3) Show configuration")
+        print("  4) Set fields (username/password/port/verify/devices)")
+        print("  Q) Quit")
+        choice = input("> ").strip().lower()
+        if choice in ("q", "quit", "exit"):  # graceful exit with code 0
+            print("Goodbye.")
+            return 0
+        try:
+            if choice == "1":
+                ns = argparse.Namespace(conffile=default_path, path=None)
+                return cmd_init(ns)
+            elif choice == "2":
+                ns = argparse.Namespace(conffile=default_path, path=None)
+                return cmd_validate(ns)
+            elif choice == "3":
+                ns = argparse.Namespace(conffile=default_path, path=None, show_secret=False)
+                return cmd_show(ns)
+            elif choice == "4":
+                # Gather fields optionally
+                print("Leave any field blank to keep existing value.")
+                username = input("Username: ").strip() or None
+                password = getpass("Password: ").strip() or None
+                port_txt = input("Port [blank to keep]: ").strip()
+                port = int(port_txt) if port_txt else None
+                verify_ssl = None
+                ans = input("Verify SSL? [y/N/blank keep]: ").strip().lower()
+                if ans in ("y", "yes", "true", "1"):
+                    verify_ssl = True
+                elif ans in ("n", "no", "false", "0"):
+                    verify_ssl = False
+                dev_line = input("Devices (comma separated host or host:port) [blank to skip]: ").strip()
+                devices = [s for s in dev_line.split(",") if s.strip()] if dev_line else []
+                overwrite = False
+                if devices:
+                    overwrite = _prompt_bool("Overwrite existing devices list?", default=False)
+                ns = argparse.Namespace(
+                    conffile=default_path,
+                    path=None,
+                    username=username,
+                    password=password,
+                    port=port,
+                    verify_ssl=verify_ssl,
+                    device=devices if devices else None,
+                    overwrite=overwrite,
+                )
+                return cmd_set(ns)
+            else:
+                print("Please select 1, 2, 3, 4 or Q.\n")
+        except KeyboardInterrupt:
+            print("\nAborted by user.")
+            return 130
+        except Exception as ex:
+            print(f"Error: {ex}")
+            return 1
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = build_parser()
+    # If no args, enter interactive menu rather than exiting with code 2
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        return interactive_menu()
     args = parser.parse_args(argv)
+    # Provide graceful help if no subcommand chosen (e.g., only -c provided)
+    if not hasattr(args, "func"):
+        print("No command provided; starting interactive mode. Use -h for help.")
+        return interactive_menu()
     return int(args.func(args))
 
 
