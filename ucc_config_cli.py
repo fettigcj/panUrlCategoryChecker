@@ -253,16 +253,65 @@ def _prompt_bool(prompt: str, default: bool = False) -> bool:
 
 def interactive_menu() -> int:
     # Default path resolution mirrors panInventory style: assume panCoreConfig.json unless overridden.
-    default_path = default_config_path()
+    active_path = default_config_path()
+    def _config_dir_from_path(p: str) -> str:
+        d = os.path.dirname(p)
+        return d or os.path.join(os.path.dirname(__file__), "config")
+    def _list_configs(conf_dir: str) -> List[str]:
+        if not os.path.isdir(conf_dir):
+            return []
+        files = []
+        for name in os.listdir(conf_dir):
+            if name.lower().endswith('.json'):
+                files.append(os.path.join(conf_dir, name))
+        files.sort()
+        return files
+    def _prompt_select(conf_dir: str) -> str | None:
+        files = _list_configs(conf_dir)
+        if not files:
+            print(f"No configs found in {conf_dir}.")
+            raw = input("Enter full path to a config file to use (or leave blank to cancel): ").strip()
+            return raw or None
+        print("Select a config:")
+        for i, fp in enumerate(files, 1):
+            mark = " (active)" if os.path.abspath(fp) == os.path.abspath(active_path) else ""
+            print(f"  {i}) {fp}{mark}")
+        print("  N) Enter a new path")
+        sel = input("> ").strip().lower()
+        if sel in ("n", "new"):
+            raw = input("Enter full path to a config file: ").strip()
+            return raw or None
+        try:
+            idx = int(sel)
+            if 1 <= idx <= len(files):
+                return files[idx - 1]
+        except Exception:
+            pass
+        print("Invalid selection.")
+        return None
+    def _pause():
+        try:
+            input("\nPress Enter to continue...")
+        except KeyboardInterrupt:
+            print("")
+
     print("URL Category Checker — Config Utility")
     print("No arguments provided; entering interactive mode. Press Ctrl+C to exit at any time.\n")
     while True:
-        print(f"Current config file: {default_path}")
+        conf_dir = _config_dir_from_path(active_path)
+        available = _list_configs(conf_dir)
+        print(f"Active config file: {active_path}")
+        if not os.path.isfile(active_path):
+            if available:
+                print(f"Note: active file does not exist. {len(available)} config(s) detected in {conf_dir}.")
+            else:
+                print(f"No configs found in {conf_dir}. Choose '1) Init' to create one or '5) Switch/select' to set a different path.")
         print("Select an action:")
         print("  1) Init configuration (interactive wizard)")
         print("  2) Validate configuration")
         print("  3) Show configuration")
         print("  4) Set fields (username/password/port/verify/devices)")
+        print("  5) Switch/select configuration")
         print("  Q) Quit")
         choice = input("> ").strip().lower()
         if choice in ("q", "quit", "exit"):  # graceful exit with code 0
@@ -270,17 +319,37 @@ def interactive_menu() -> int:
             return 0
         try:
             if choice == "1":
-                ns = argparse.Namespace(conffile=default_path, path=None)
-                return cmd_init(ns)
+                ns = argparse.Namespace(conffile=active_path, path=None)
+                rc = cmd_init(ns)
+                _pause()
+                continue
             elif choice == "2":
-                ns = argparse.Namespace(conffile=default_path, path=None)
-                return cmd_validate(ns)
+                if not os.path.isfile(active_path):
+                    print(f"No config found at {active_path}. Please create one (Init) or switch to an existing config.")
+                    _pause()
+                    continue
+                ns = argparse.Namespace(conffile=active_path, path=None)
+                rc = cmd_validate(ns)
+                _pause()
+                continue
             elif choice == "3":
-                ns = argparse.Namespace(conffile=default_path, path=None, show_secret=False)
-                return cmd_show(ns)
+                if not os.path.isfile(active_path):
+                    confs = _list_configs(conf_dir)
+                    if not confs:
+                        print(f"No configs found in {conf_dir}; please create one with 'Init' or 'Switch/select' another path.")
+                    else:
+                        print(f"Active config missing. {len(confs)} config(s) available in {conf_dir}. Use 'Switch/select' to choose.")
+                    _pause()
+                    continue
+                ns = argparse.Namespace(conffile=active_path, path=None, show_secret=False)
+                rc = cmd_show(ns)
+                _pause()
+                continue
             elif choice == "4":
                 # Gather fields optionally
                 print("Leave any field blank to keep existing value.")
+                if not os.path.isfile(active_path):
+                    print(f"No config found at {active_path}. We'll create it upon saving.")
                 username = input("Username: ").strip() or None
                 password = getpass("Password: ").strip() or None
                 port_txt = input("Port [blank to keep]: ").strip()
@@ -297,7 +366,7 @@ def interactive_menu() -> int:
                 if devices:
                     overwrite = _prompt_bool("Overwrite existing devices list?", default=False)
                 ns = argparse.Namespace(
-                    conffile=default_path,
+                    conffile=active_path,
                     path=None,
                     username=username,
                     password=password,
@@ -306,15 +375,27 @@ def interactive_menu() -> int:
                     device=devices if devices else None,
                     overwrite=overwrite,
                 )
-                return cmd_set(ns)
+                rc = cmd_set(ns)
+                _pause()
+                continue
+            elif choice == "5":
+                sel = _prompt_select(conf_dir)
+                if sel:
+                    active_path = sel
+                    print(f"Active config set to: {active_path}")
+                _pause()
+                continue
             else:
-                print("Please select 1, 2, 3, 4 or Q.\n")
+                print("Please select 1, 2, 3, 4, 5 or Q.\n")
+                _pause()
+                continue
         except KeyboardInterrupt:
             print("\nAborted by user.")
             return 130
         except Exception as ex:
             print(f"Error: {ex}")
-            return 1
+            _pause()
+            continue
 
 
 def main(argv: List[str] | None = None) -> int:
