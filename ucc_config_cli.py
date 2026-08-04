@@ -5,6 +5,80 @@ import sys
 from getpass import getpass
 from typing import Any, Dict, List
 
+# Optional TUI enhancements via prompt_toolkit (now listed in requirements)
+try:
+    from prompt_toolkit import prompt as pt_prompt
+    from prompt_toolkit.validation import Validator, ValidationError
+    from prompt_toolkit.shortcuts import radiolist_dialog, yes_no_dialog
+    HAVE_PT = True
+except Exception:
+    HAVE_PT = False
+
+
+# ---- prompt_toolkit helper wrappers ----
+class _IntValidator(Validator):
+    def validate(self, document):
+        text = document.text.strip()
+        if not text:
+            return
+        try:
+            int(text)
+        except Exception:
+            raise ValidationError(message="Please enter an integer", cursor_position=len(text))
+
+def tui_input(message: str, default: str | None = None, password: bool = False) -> str:
+    if HAVE_PT:
+        kwargs = {"default": default or ""}
+        try:
+            return pt_prompt(message, is_password=password, **kwargs)
+        except TypeError:
+            # Older prompt_toolkit versions may not support is_password in prompt(); fallback
+            return pt_prompt(message, **kwargs)
+    # Fallback to input/getpass
+    if password:
+        return getpass(message)
+    val = input(message)
+    if not val and default is not None:
+        return default
+    return val
+
+def tui_confirm(message: str, default: bool = False) -> bool:
+    if HAVE_PT:
+        try:
+            result = yes_no_dialog(title="Confirm", text=message).run()
+            if result is None:
+                return default
+            return bool(result)
+        except Exception:
+            pass
+    # Fallback
+    suf = "Y/n" if default else "y/N"
+    ans = input(f"{message} [{suf}]: ").strip().lower()
+    if not ans:
+        return default
+    return ans in ("y", "yes", "true", "1")
+
+def tui_select(title: str, message: str, choices: list[tuple[str, str]]) -> str | None:
+    """choices is list of (key, label). Returns selected key or None."""
+    if HAVE_PT and choices:
+        try:
+            result = radiolist_dialog(title=title, text=message, values=choices).run()
+            return result
+        except Exception:
+            pass
+    # Fallback simple print
+    print(message)
+    for i, (_key, label) in enumerate(choices, 1):
+        print(f"  {i}) {label}")
+    sel = input("> ").strip()
+    try:
+        idx = int(sel)
+        if 1 <= idx <= len(choices):
+            return choices[idx - 1][0]
+    except Exception:
+        return None
+    return None
+
 
 def default_config_path() -> str:
     # Respect PANCORE_CONFIG if it points to a file path; else use ./config/panCoreConfig.json
@@ -177,18 +251,19 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_init(args: argparse.Namespace) -> int:
     path = resolve_config_path(args)
     print(f"Initializing configuration at {path}...")
-    username = input("API Username: ")
-    password = getpass("API Password: ")
-    port_in = input("API Port [443]: ").strip() or "443"
+    username = tui_input("API Username: ")
+    password = tui_input("API Password: ", password=True)
+    port_in = tui_input("API Port [443]: ", default="443").strip()
+    if not port_in:
+        port_in = "443"
     try:
         port = int(port_in)
     except Exception:
         print("Port must be an integer; defaulting to 443")
         port = 443
-    verify_in = input("Verify SSL (y/N): ").strip().lower()
-    verify_ssl = verify_in in ("y", "yes", "true", "1")
+    verify_ssl = tui_confirm("Verify SSL?", default=False)
 
-    dev_str = input("Firewall hosts (comma-separated, host or host:port): ").strip()
+    dev_str = tui_input("Firewall hosts (comma-separated, host or host:port): ", default="").strip()
     devices = parse_devices_list([s for s in dev_str.split(",") if s.strip()])
 
     cfg = {
@@ -244,11 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _prompt_bool(prompt: str, default: bool = False) -> bool:
-    suf = "Y/n" if default else "y/N"
-    ans = input(f"{prompt} [{suf}]: ").strip().lower()
-    if not ans:
-        return default
-    return ans in ("y", "yes", "true", "1")
+    return tui_confirm(prompt, default=default)
 
 
 def interactive_menu() -> int:
@@ -272,10 +343,15 @@ def interactive_menu() -> int:
             print(f"No configs found in {conf_dir}.")
             raw = input("Enter full path to a config file to use (or leave blank to cancel): ").strip()
             return raw or None
-        print("Select a config:")
-        for i, fp in enumerate(files, 1):
+        # Use a TUI selection when available
+        labels = []
+        for fp in files:
             mark = " (active)" if os.path.abspath(fp) == os.path.abspath(active_path) else ""
-            print(f"  {i}) {fp}{mark}")
+            labels.append((fp, f"{fp}{mark}"))
+        sel_key = tui_select(title="Select configuration", message="Choose a config file:", choices=labels)
+        if sel_key:
+            return sel_key
+        # Fallback manual entry
         print("  N) Enter a new path")
         sel = input("> ").strip().lower()
         if sel in ("n", "new"):
@@ -306,14 +382,29 @@ def interactive_menu() -> int:
                 print(f"Note: active file does not exist. {len(available)} config(s) detected in {conf_dir}.")
             else:
                 print(f"No configs found in {conf_dir}. Choose '1) Init' to create one or '5) Switch/select' to set a different path.")
-        print("Select an action:")
-        print("  1) Init configuration (interactive wizard)")
-        print("  2) Validate configuration")
-        print("  3) Show configuration")
-        print("  4) Set fields (username/password/port/verify/devices)")
-        print("  5) Switch/select configuration")
-        print("  Q) Quit")
-        choice = input("> ").strip().lower()
+        # Use prompt_toolkit radiolist if available for better UX
+        if HAVE_PT:
+            choice = tui_select(
+                title="URL Category Checker",
+                message="Select an action:",
+                choices=[
+                    ("1", "Init configuration (interactive wizard)"),
+                    ("2", "Validate configuration"),
+                    ("3", "Show configuration"),
+                    ("4", "Set fields (username/password/port/verify/devices)"),
+                    ("5", "Switch/select configuration"),
+                    ("q", "Quit"),
+                ],
+            ) or ""
+        else:
+            print("Select an action:")
+            print("  1) Init configuration (interactive wizard)")
+            print("  2) Validate configuration")
+            print("  3) Show configuration")
+            print("  4) Set fields (username/password/port/verify/devices)")
+            print("  5) Switch/select configuration")
+            print("  Q) Quit")
+            choice = input("> ").strip().lower()
         if choice in ("q", "quit", "exit"):  # graceful exit with code 0
             print("Goodbye.")
             return 0
@@ -350,17 +441,24 @@ def interactive_menu() -> int:
                 print("Leave any field blank to keep existing value.")
                 if not os.path.isfile(active_path):
                     print(f"No config found at {active_path}. We'll create it upon saving.")
-                username = input("Username: ").strip() or None
-                password = getpass("Password: ").strip() or None
-                port_txt = input("Port [blank to keep]: ").strip()
+                username = tui_input("Username: ").strip() or None
+                password = tui_input("Password: ", password=True).strip() or None
+                port_txt = tui_input("Port [blank to keep]: ", default="").strip()
                 port = int(port_txt) if port_txt else None
                 verify_ssl = None
-                ans = input("Verify SSL? [y/N/blank keep]: ").strip().lower()
-                if ans in ("y", "yes", "true", "1"):
-                    verify_ssl = True
-                elif ans in ("n", "no", "false", "0"):
-                    verify_ssl = False
-                dev_line = input("Devices (comma separated host or host:port) [blank to skip]: ").strip()
+                if HAVE_PT:
+                    yn = tui_select(title="Verify SSL", message="Verify SSL?", choices=[("y","Yes"),("n","No"),("k","Keep current")]) or "k"
+                    if yn == "y":
+                        verify_ssl = True
+                    elif yn == "n":
+                        verify_ssl = False
+                else:
+                    ans = input("Verify SSL? [y/N/blank keep]: ").strip().lower()
+                    if ans in ("y", "yes", "true", "1"):
+                        verify_ssl = True
+                    elif ans in ("n", "no", "false", "0"):
+                        verify_ssl = False
+                dev_line = tui_input("Devices (comma separated host or host:port) [blank to skip]: ", default="").strip()
                 devices = [s for s in dev_line.split(",") if s.strip()] if dev_line else []
                 overwrite = False
                 if devices:

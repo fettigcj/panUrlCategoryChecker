@@ -65,47 +65,67 @@ def load_config_path() -> str:
 def build_firewalls() -> List[Any]:
     """Build a list of pan-os-python Firewall objects from configuration.
 
-    Expected JSON structure (config/panCoreConfig.json):
-    {
-      "api": {"username": "apiuser", "password": "apipass", "port": 443, "verify_ssl": false},
-      "devices": [
-        {"host": "fw1.example.com"},
-        {"host": "fw2.example.com", "port": 443}
-      ]
-    }
-    You can also point PANCORE_CONFIG to an alternate JSON path.
+    Preferred: Use pancore.panCore to mirror panInventory startup:
+      - panCore.configStart(headless=True, configStorage=<config json>)
+      - panCore.buildPano_obj(...)
+    Fallback: Read minimal JSON (api/devices) and construct Firewall objects directly.
     """
-    import json
-
     cfg_file = load_config_path()
     firewalls: List[Any] = []
     if not os.path.isfile(cfg_file):
         return firewalls
-    with open(cfg_file, 'r', encoding='utf-8') as fh:
-        cfg = json.load(fh)
-    api = cfg.get('api', {})
-    username = api.get('username')
-    password = api.get('password')
-    port = int(api.get('port', 443))
-    verify_ssl = bool(api.get('verify_ssl', False))
-    devices = cfg.get('devices', [])
 
-    if Firewall is None:
+    # First try pancore-based initialization if available
+    try:
+        from pancore import panCore  # type: ignore
+        # Headless so no prompts in web context; use our resolved config path
+        panCore.configStart(headless=True, configStorage=cfg_file)
+        # Some versions require attributes set by configStart; guard accordingly
+        pano_obj, deviceGroups, firewalls, templates, tStacks = panCore.buildPano_obj(
+            panAddress=getattr(panCore, 'panAddress', None),
+            panUser=getattr(panCore, 'panUser', None),
+            panPass=getattr(panCore, 'panPass', None),
+            panPort=getattr(panCore, 'panPort', 443),
+            verify_SSL=getattr(panCore, 'verifySSL', False)
+        )
+        # buildPano_obj returns a list of Firewall objects among other items
+        if isinstance(firewalls, list) and firewalls:
+            return firewalls
+    except Exception:
+        # Fall back to local JSON parsing below
+        pass
+
+    # Fallback: local JSON schema (api/devices)
+    try:
+        import json
+        with open(cfg_file, 'r', encoding='utf-8') as fh:
+            cfg = json.load(fh)
+        api = cfg.get('api', {})
+        username = api.get('username')
+        password = api.get('password')
+        port = int(api.get('port', 443))
+        verify_ssl = bool(api.get('verify_ssl', False))
+        devices = cfg.get('devices', [])
+
+        if Firewall is None:
+            return firewalls
+
+        for dev in devices:
+            host = dev.get('host') or dev.get('hostname') or dev.get('ip')
+            if not host:
+                continue
+            dev_port = int(dev.get('port', port))
+            fw = Firewall(hostname=host, api_username=username, api_password=password, port=dev_port)
+            # Optionally set verify SSL on the underlying HTTP client if available
+            try:
+                if hasattr(fw, 'xapi') and hasattr(fw.xapi, 'verify'):
+                    fw.xapi.verify = verify_ssl
+            except Exception:
+                pass
+            firewalls.append(fw)
+    except Exception:
+        # On parsing error, just return whatever we have (likely empty)
         return firewalls
-
-    for dev in devices:
-        host = dev.get('host') or dev.get('hostname') or dev.get('ip')
-        if not host:
-            continue
-        dev_port = int(dev.get('port', port))
-        fw = Firewall(hostname=host, api_username=username, api_password=password, port=dev_port)
-        # Optionally set verify SSL on the underlying HTTP client if available
-        try:
-            if hasattr(fw, 'xapi') and hasattr(fw.xapi, 'verify'):
-                fw.xapi.verify = verify_ssl
-        except Exception:
-            pass
-        firewalls.append(fw)
     return firewalls
 
 

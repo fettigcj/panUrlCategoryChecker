@@ -35,3 +35,10 @@ build/
 
 # Submodule metadata
 .pythonsubmodules/
+
+# Local virtualenv (Windows venv)
+Lib/
+# Local backup of old pancore folder (created 2026-08-04)
+pancore_local_backup_*/
+# Misc
+CACHEDIR.TAG

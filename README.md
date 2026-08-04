@@ -5,7 +5,7 @@ A minimal Flask app that accepts a list of URLs, distributes the checks across a
 
 Highlights
 - Reuses shared code via the pancore submodule (see ./pancore)
-- Builds a list of pan-os-python Firewall objects from a JSON config
+- Builds firewall objects via pancore.panCore when available (mirrors panInventory startup); falls back to JSON parsing
 - Parallelizes URL checks with a thread pool
 - Simple web UI and WSGI entrypoint for Apache mod_wsgi
 
