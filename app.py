@@ -34,7 +34,9 @@ def create_app() -> Flask:
 
     @app.get('/')
     def index():
-        return render_template('index.html', fw_count=len(firewalls))
+        cfg_path = load_config_path()
+        cfg_exists = os.path.isfile(cfg_path)
+        return render_template('index.html', fw_count=len(firewalls), cfg_path=cfg_path, cfg_exists=cfg_exists)
 
     @app.post('/check')
     def check():

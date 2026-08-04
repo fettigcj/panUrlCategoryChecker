@@ -26,9 +26,17 @@ Setup
    .venv\Scripts\activate
    pip install -r requirements.txt
 
-3) Configure firewalls
-   - Copy config/panCoreConfig.json.example to config/panCoreConfig.json and edit values
-   - Or set environment variable PANCORE_CONFIG to point to your JSON file elsewhere
+3) Configure firewalls (CLI recommended)
+   - Run the interactive wizard:
+     python ucc_config_cli.py init
+   - Or set fields non-interactively:
+     python ucc_config_cli.py set --username APIUSER --password APIPASS --port 443 --no-verify-ssl \
+       --device fw1.example.com --device fw2.example.com:443
+   - Validate and view:
+     python ucc_config_cli.py validate
+     python ucc_config_cli.py show
+   - Alternatively, you can still copy config/panCoreConfig.json.example to config/panCoreConfig.json and edit manually,
+     or set environment variable PANCORE_CONFIG to point to your JSON file elsewhere
 
    Example JSON:
    {

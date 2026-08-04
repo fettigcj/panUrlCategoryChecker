@@ -17,6 +17,24 @@
     <p class="muted">Paste one URL per line. The app will validate and distribute checks across {{ fw_count }} firewall(s).
     Missing scheme defaults to http://</p>
 
+    {% if not cfg_exists or fw_count == 0 %}
+    <article>
+      <header><strong>Configuration required</strong></header>
+      <p>
+        No firewalls are configured yet. Create or update your panCoreConfig.json using the CLI utility from a terminal:
+      </p>
+      <pre><code>python ucc_config_cli.py init
+# or non-interactive
+python ucc_config_cli.py set --username APIUSER --password APIPASS --port 443 --no-verify-ssl \
+  --device fw1.example.com --device fw2.example.com:443
+
+# validate and show
+python ucc_config_cli.py validate
+python ucc_config_cli.py show</code></pre>
+      <p class="muted">Config path: {{ cfg_path }}</p>
+    </article>
+    {% endif %}
+
     <form method="post" action="/check">
       <label for="urls">URLs (one per line)</label>
       <textarea id="urls" name="urls" placeholder="example.com\nhttps://www.paloaltonetworks.com\nhttp://news.example.org/path?x=1"></textarea>
