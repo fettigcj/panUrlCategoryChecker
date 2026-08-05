@@ -16,7 +16,7 @@
     <h1>URL Category Checker</h1>
     <p class="muted">Paste one URL per line. The app will validate and distribute checks across {{ fw_count }} config group(s).
     Protocol (http/https) is optional and will not be prepended.</p>
-    <p><a href="/config">Show config</a> • <a href="/availability">Test availability</a></p>
+    <p><a href="{{ url_for('show_config') }}">Show config</a> • <a href="{{ url_for('availability') }}">Test availability</a></p>
 
     {% if not cfg_exists or fw_count == 0 %}
     <article>
@@ -36,7 +36,7 @@ python ucc_config_cli.py show</code></pre>
     </article>
     {% endif %}
 
-    <form method="post" action="/check">
+    <form method="post" action="{{ url_for('check') }}">
       <label for="urls">URLs (one per line)</label>
       <textarea id="urls" name="urls" placeholder="example.com\nhttps://www.paloaltonetworks.com\nhttp://news.example.org/path?x=1"></textarea>
 

@@ -18,7 +18,7 @@
 <body>
   <main class="container">
     <h1>Results</h1>
-    <p><a href="/">Back</a> • Firewalls available: {{ fw_count }}</p>
+    <p><a href="{{ url_for('index') }}">Back</a> • Firewalls available: {{ fw_count }}</p>
 
     {% if errors and errors|length %}
     <article class="err">
