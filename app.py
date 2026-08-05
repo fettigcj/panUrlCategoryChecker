@@ -347,5 +347,5 @@ def check_urls_parallel(urls: List[str], firewalls: List[Any], max_workers: int 
 # Create app instance for WSGI/Flask CLI
 app = create_app()
 
-if __name__ == '__main__':  # pragma: no cover
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', '5000')), debug=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
