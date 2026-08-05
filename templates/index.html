@@ -14,8 +14,9 @@
 <body>
   <main class="container">
     <h1>URL Category Checker</h1>
-    <p class="muted">Paste one URL per line. The app will validate and distribute checks across {{ fw_count }} firewall(s).
-    Missing scheme defaults to http://</p>
+    <p class="muted">Paste one URL per line. The app will validate and distribute checks across {{ fw_count }} config group(s).
+    Protocol (http/https) is optional and will not be prepended.</p>
+    <p><a href="/config">Show config</a> • <a href="/availability">Test availability</a></p>
 
     {% if not cfg_exists or fw_count == 0 %}
     <article>
@@ -38,6 +39,20 @@ python ucc_config_cli.py show</code></pre>
     <form method="post" action="/check">
       <label for="urls">URLs (one per line)</label>
       <textarea id="urls" name="urls" placeholder="example.com\nhttps://www.paloaltonetworks.com\nhttp://news.example.org/path?x=1"></textarea>
+
+      {% if configs and configs|length %}
+      <fieldset>
+        <legend>Select configs to use</legend>
+        <p class="muted">Uncheck any configs you want to exclude from this request.</p>
+        {% for c in configs %}
+          <label>
+            <input type="checkbox" name="configs" value="{{ c | basename }}" checked>
+            <code>{{ c }}</code>
+          </label>
+        {% endfor %}
+      </fieldset>
+      {% endif %}
+
       <div>
         <button type="submit">Check categories</button>
       </div>

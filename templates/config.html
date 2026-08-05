@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configurations</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    .container { max-width: 960px; margin: 2rem auto; }
+    code { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Discovered Config Files</h1>
+    <p><a href="/">Back</a></p>
+
+    {% if not configs or configs|length == 0 %}
+      <article>
+        <header>No configs found</header>
+        <p>Place one or more panCore-compatible JSON config files in the <code>./config</code> directory.</p>
+      </article>
+    {% else %}
+      <ul>
+      {% for c in configs %}
+        <li><code>{{ c }}</code></li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+  </main>
+</body>
+</html>

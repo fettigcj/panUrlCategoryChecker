@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Availability</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    .container { max-width: 960px; margin: 2rem auto; }
+    .ok { color: #0a0; }
+    .err { color: #b00; }
+    td, th { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Group Availability</h1>
+    <p><a href="/">Back</a></p>
+
+    {% if errors and errors|length %}
+    <article class="err">
+      <header>Errors</header>
+      <ul>
+        {% for e in errors %}
+          <li>{{ e }}</li>
+        {% endfor %}
+      </ul>
+    </article>
+    {% endif %}
+
+    {% if not groups or groups|length == 0 %}
+      <p>No groups detected. Ensure you have valid config files under <code>./config</code>.</p>
+    {% else %}
+    <table role="grid">
+      <thead>
+        <tr>
+          <th>Group</th>
+          <th>Observed Firewalls</th>
+          <th>OK</th>
+          <th>Errors</th>
+          <th>Status</th>
+          <th>Last error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in groups %}
+        <tr>
+          <td>{{ g.index }}</td>
+          <td>{{ g.fw_count_observed }}</td>
+          <td>{{ g.ok_count }}</td>
+          <td>{{ g.error_count }}</td>
+          <td>{% if g.available %}<span class="ok">Available</span>{% else %}<span class="err">Unavailable</span>{% endif %}</td>
+          <td>{{ g.last_error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </main>
+</body>
+</html>

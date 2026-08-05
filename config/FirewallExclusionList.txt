@@ -1,0 +1,5 @@
+# One firewall serial number per line to exclude from queries.
+# Lines starting with # are comments; blank lines are ignored.
+# Example:
+# 008001000123
+# 007001000ABC

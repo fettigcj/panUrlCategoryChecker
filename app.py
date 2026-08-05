@@ -1,128 +1,222 @@
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Tuple
-from urllib.parse import urlparse
+import io
+import json
 import xml.etree.ElementTree as ET
+from typing import List, Dict, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, render_template, request
-
-# Optional import of pancore package (provided via submodule at ./pancore)
+# --- Ensure Flask is importable; if not, try to re-exec using the repo's local venv ---
 try:
-    import pancore  # noqa: F401
+    from flask import Flask, render_template, request  # type: ignore
+except ModuleNotFoundError:
+    # If running outside the repo's venv, try to relaunch with it automatically
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    candidate = os.path.join(repo_root, 'Scripts', 'python.exe')
+    if os.name == 'nt' and os.path.isfile(candidate):
+        # Avoid infinite loop: detect if we're already using this interpreter
+        try:
+            current = os.path.abspath(sys.executable)
+        except Exception:
+            current = ''
+        if os.path.normcase(current) != os.path.normcase(os.path.abspath(candidate)):
+            # Re-exec with the repo venv Python
+            os.execv(candidate, [candidate, __file__] + sys.argv[1:])
+    # If that didn't work, re-raise so the error is visible
+    raise
+
+# We delegate URL checks to the CLI engine in panCheckURL.py
+try:
+    import panCheckURL as ucc
 except Exception:
-    pancore = None  # optional; app can still run without importing from pancore directly
-
-# pan-os-python (Firewall objects)
-try:
-    from panos.firewall import Firewall
-except Exception as e:  # pragma: no cover
-    Firewall = None  # type: ignore
+    ucc = None  # type: ignore
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.config['MAX_WORKERS'] = int(os.environ.get('UCC_MAX_WORKERS', '16'))
-    app.config['REQUEST_TIMEOUT'] = int(os.environ.get('UCC_REQUEST_TIMEOUT', '15'))
 
-    # Load firewall objects once at startup
-    firewalls = build_firewalls()
+    # Jinja filter to get basename of a path
+    @app.template_filter('basename')
+    def _basename_filter(value: str) -> str:
+        try:
+            return os.path.basename(value)
+        except Exception:
+            return value or ''
 
     @app.get('/')
     def index():
-        cfg_path = load_config_path()
-        cfg_exists = os.path.isfile(cfg_path)
-        return render_template('index.html', fw_count=len(firewalls), cfg_path=cfg_path, cfg_exists=cfg_exists)
+        # Count configs and pass list to allow selection on the form
+        cfgs = discover_configs_safe()
+        return render_template('index.html', fw_count=len(cfgs), cfg_path='config', cfg_exists=bool(cfgs), configs=cfgs)
 
     @app.post('/check')
     def check():
         raw = request.form.get('urls', '')
-        urls = normalize_urls(raw)
+        urls = normalize_urls_web(raw)
+        # Selected configs by basename
+        selected = request.form.getlist('configs') or []
         if not urls:
-            return render_template('results.html', results=[], errors=['No valid URLs provided'], fw_count=len(firewalls))
-        # Run parallel checks
-        results, errors = check_urls_parallel(urls, firewalls, max_workers=app.config['MAX_WORKERS'], timeout=app.config['REQUEST_TIMEOUT'])
-        return render_template('results.html', results=results, errors=errors, fw_count=len(firewalls))
+            return render_template('results.html', results=[], errors=['No valid URLs provided'], fw_count=0)
+        # If configs exist but none selected, prompt user to pick at least one
+        all_cfgs = discover_configs_safe()
+        if all_cfgs and len(selected) == 0:
+            return render_template('results.html', results=[], errors=['No configs selected. Please choose at least one configuration.'], fw_count=len(all_cfgs), groups=[])
+        rows, errors, group_meta = run_pancheck(urls, include_configs=selected)
+        return render_template('results.html', results=rows, errors=errors, fw_count=len(discover_configs_safe()), groups=group_meta)
+
+    @app.get('/config')
+    def show_config():
+        cfgs = discover_configs_safe()
+        return render_template('config.html', configs=cfgs)
+
+    @app.get('/availability')
+    def availability():
+        # Run a light probe against a tiny URL set to determine group availability
+        probe_urls = ['example.com']
+        _rows, errors, group_meta = run_pancheck(probe_urls, per_group=True, max_workers=4, timeout=8)
+        return render_template('availability.html', groups=group_meta, errors=errors)
 
     return app
 
 
-# ========== Firewall utilities ==========
+# ========== Helpers to bridge to panCheckURL ==========
 
-def load_config_path() -> str:
-    # Prefer env var; else config/panCoreConfig.json in repo
-    env_path = os.environ.get('PANCORE_CONFIG')
-    if env_path and os.path.isfile(env_path):
-        return env_path
-    fallback = os.path.join(os.path.dirname(__file__), 'config', 'panCoreConfig.json')
-    return fallback
-
-
-def build_firewalls() -> List[Any]:
-    """Build a list of pan-os-python Firewall objects from configuration.
-
-    Preferred: Use pancore.panCore to mirror panInventory startup:
-      - panCore.configStart(headless=True, configStorage=<config json>)
-      - panCore.buildPano_obj(...)
-    Fallback: Read minimal JSON (api/devices) and construct Firewall objects directly.
-    """
-    cfg_file = load_config_path()
-    firewalls: List[Any] = []
-    if not os.path.isfile(cfg_file):
-        return firewalls
-
-    # First try pancore-based initialization if available
+def normalize_urls_web(text_block: str) -> List[str]:
+    s = (text_block or '').strip()
+    if not s:
+        return []
     try:
-        from pancore import panCore  # type: ignore
-        # Headless so no prompts in web context; use our resolved config path
-        panCore.configStart(headless=True, configStorage=cfg_file)
-        # Some versions require attributes set by configStart; guard accordingly
-        pano_obj, deviceGroups, firewalls, templates, tStacks = panCore.buildPano_obj(
-            panAddress=getattr(panCore, 'panAddress', None),
-            panUser=getattr(panCore, 'panUser', None),
-            panPass=getattr(panCore, 'panPass', None),
-            panPort=getattr(panCore, 'panPort', 443),
-            verify_SSL=getattr(panCore, 'verifySSL', False)
-        )
-        # buildPano_obj returns a list of Firewall objects among other items
-        if isinstance(firewalls, list) and firewalls:
-            return firewalls
+        # Reuse CLI normalizer if available for perfect parity
+        if ucc and hasattr(ucc, 'normalize_urls'):
+            return getattr(ucc, 'normalize_urls')(s)
     except Exception:
-        # Fall back to local JSON parsing below
         pass
+    # Fallback: simple split by lines/commas and strip protocol
+    items: List[str] = []
+    for raw in s.replace(',', '\n').splitlines():
+        t = raw.strip().strip('"\'')
+        if not t or t.startswith('#'):
+            continue
+        if t.startswith('http://'):
+            t = t[7:]
+        elif t.startswith('https://'):
+            t = t[8:]
+        if t.startswith('//'):
+            t = t[2:]
+        items.append(t)
+    # de-dup preserve order
+    seen = set()
+    out: List[str] = []
+    for u in items:
+        k = u.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(u)
+    return out
 
-    # Fallback: local JSON schema (api/devices)
+
+def discover_configs_safe() -> List[str]:
     try:
-        import json
-        with open(cfg_file, 'r', encoding='utf-8') as fh:
-            cfg = json.load(fh)
-        api = cfg.get('api', {})
-        username = api.get('username')
-        password = api.get('password')
-        port = int(api.get('port', 443))
-        verify_ssl = bool(api.get('verify_ssl', False))
-        devices = cfg.get('devices', [])
-
-        if Firewall is None:
-            return firewalls
-
-        for dev in devices:
-            host = dev.get('host') or dev.get('hostname') or dev.get('ip')
-            if not host:
-                continue
-            dev_port = int(dev.get('port', port))
-            fw = Firewall(hostname=host, api_username=username, api_password=password, port=dev_port)
-            # Optionally set verify SSL on the underlying HTTP client if available
-            try:
-                if hasattr(fw, 'xapi') and hasattr(fw.xapi, 'verify'):
-                    fw.xapi.verify = verify_ssl
-            except Exception:
-                pass
-            firewalls.append(fw)
+        if ucc and hasattr(ucc, 'discover_configs'):
+            # Default to ./config directory
+            return getattr(ucc, 'discover_configs')(getattr(ucc, '_resolve_candidate')('config'))
     except Exception:
-        # On parsing error, just return whatever we have (likely empty)
-        return firewalls
-    return firewalls
+        pass
+    # Fallback: list JSON files under ./config
+    base = os.path.join(os.path.dirname(__file__), 'config')
+    files: List[str] = []
+    try:
+        for name in os.listdir(base):
+            if name.lower().endswith('.json'):
+                files.append(os.path.join(base, name))
+    except Exception:
+        return []
+    return sorted(files)
+
+
+def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16, timeout: int = 15, include_configs: List[str] | None = None) -> tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]: 
+    """Invoke panCheckURL.main in-process and capture JSON output.
+    Returns (rows_for_ui, errors, group_meta)
+    """
+    if not ucc:
+        return [], ["panCheckURL module not available"], []
+    # Build argv for the CLI
+    argv = [
+        '-c', 'config',
+        '--urls', '\n'.join(urls),
+        '--output', 'json',
+        '--workers', str(max_workers),
+        '--timeout', str(timeout),
+        '--no-default-file',
+    ]
+    if include_configs:
+        for nm in include_configs:
+            argv.extend(['--include-configs', os.path.basename(nm)])
+    if per_group:
+        argv.append('--per-group')
+    # Capture stdout
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    try:
+        sys.stdout = buf
+        try:
+            ucc.main(argv)
+        except SystemExit as se:
+            # Some entrypoints might raise SystemExit; ignore and use buffer
+            pass
+    finally:
+        sys.stdout = old_stdout
+    txt = buf.getvalue()
+    try:
+        data = json.loads(txt) if txt.strip().startswith('{') else {}
+    except Exception:
+        data = {}
+    # Parse results
+    rows_ui: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    if isinstance(data, dict):
+        # Prefer detailed rows when available
+        rows_json = data.get('rows', [])
+        if isinstance(rows_json, list) and rows_json:
+            for r in rows_json:
+                # Map to UI fields expected by results.html
+                rows_ui.append({
+                    'url': r.get('url',''),
+                    'category': r.get('category',''),
+                    'firewall': (r.get('fw_host','') + (f" [{r.get('fw_serial')}]" if r.get('fw_serial') else '')),
+                    'ok': r.get('status') == 'OK',
+                    'raw': '',
+                    'error': '' if r.get('status') == 'OK' else (r.get('status') or ''),
+                    'category1_base': r.get('category1_base',''),
+                    'category2_base': r.get('category2_base',''),
+                    'category1_cloud': r.get('category1_cloud',''),
+                    'category2_cloud': r.get('category2_cloud',''),
+                    'disagree': r.get('disagree', False),
+                    'group': r.get('group',''),
+                })
+        else:
+            # Fallback to older responses map
+            responses = data.get('responses', {})
+            for u, perdb in (responses.items() if isinstance(responses, dict) else []):
+                cloud = perdb.get('cloudDB', {}) if isinstance(perdb, dict) else {}
+                base = perdb.get('baseDB', {}) if isinstance(perdb, dict) else {}
+                cat = cloud.get('category1') or base.get('category1') or ''
+                rows_ui.append({
+                    'url': u,
+                    'category': cat,
+                    'firewall': '',
+                    'ok': True,
+                    'raw': '',
+                    'error': ''
+                })
+        groups = data.get('groups', [])
+    else:
+        groups = []
+        # Try to detect error text in the buffer
+        if txt and not txt.strip().startswith('{'):
+            errors.append(txt.strip()[:1000])
+    return rows_ui, errors, groups
 
 
 # ========== URL processing and checks ==========
@@ -131,34 +225,38 @@ ALLOWED_SCHEMES = {"http", "https"}
 
 
 def normalize_urls(text_block: str) -> List[str]:
-    """Convert a pasted text block into a list of normalized URL strings."""
+    """Convert a pasted text block into a list of URL strings WITHOUT forcing a protocol.
+    - Accept bare domains like 'cnn.com' or 'www.cnn.com'.
+    - If http/https is provided, strip it so we pass just the host/path to 'test url'.
+    - Preserve path and query when present.
+    - De-duplicate while preserving order (case-insensitive comparison).
+    """
     urls: List[str] = []
+    seen_ci: set[str] = set()
     for raw in text_block.splitlines():
-        s = raw.strip()
+        s = (raw or '').strip()
         if not s:
             continue
-        # If missing scheme, default to http://
-        if '://' not in s:
-            s = 'http://' + s
-        try:
-            p = urlparse(s)
-            if p.scheme.lower() not in ALLOWED_SCHEMES or not p.netloc:
+        # Support comma-separated entries on the same line
+        parts = [p.strip() for p in s.split(',') if p.strip()]
+        for p in parts:
+            q = p
+            lp = q.lower()
+            if lp.startswith('http://'):
+                q = q[7:]
+            elif lp.startswith('https://'):
+                q = q[8:]
+            elif q.startswith('//'):
+                q = q[2:]
+            q = q.strip(" <>\"'")
+            if not q:
                 continue
-            # drop fragments; keep path/query
-            normalized = f"{p.scheme}://{p.netloc}{p.path or ''}"
-            if p.query:
-                normalized += f"?{p.query}"
-            urls.append(normalized)
-        except Exception:
-            continue
-    # de-duplicate preserving order
-    seen = set()
-    uniq: List[str] = []
-    for u in urls:
-        if u not in seen:
-            uniq.append(u)
-            seen.add(u)
-    return uniq
+            key = q.lower()
+            if key in seen_ci:
+                continue
+            seen_ci.add(key)
+            urls.append(q)
+    return urls
 
 
 def _parse_category_from_op(xml_elem: ET.Element) -> Tuple[str, str]:

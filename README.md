@@ -6,7 +6,7 @@ A minimal Flask app that accepts a list of URLs, distributes the checks across a
 Highlights
 - Reuses shared code via the pancore submodule (see ./pancore)
 - Builds firewall objects via pancore.panCore when available (mirrors panInventory startup); falls back to JSON parsing
-- Parallelizes URL checks with a thread pool
+- Parallelizes URL checks with a thread pool and dynamic dispatch that retries on firewall failures
 - Simple web UI and WSGI entrypoint for Apache mod_wsgi
 
 Requirements
@@ -54,10 +54,17 @@ Setup
    flask --app app run --debug
    # or
    python app.py
+   # Tip: If you simply do `py app.py`, the script will auto-switch to the repo's local venv at `./Scripts/python.exe`
+   # on Windows if Flask isn't importable in your current interpreter. Alternatively, activate the venv first:
+   #   .\\Scripts\\activate
+   #   pip install -r requirements.txt
 
 5) Use
    - Open http://127.0.0.1:5000/
-   - Paste one URL per line; scheme will default to http:// if omitted
+   - Paste one URL per line; protocol (http/https) is optional and not required. The tool will not prepend a scheme and will send the host/path as provided.
+   - Links:
+     - Show config: lists discovered config JSON files (read-only)
+     - Test availability: runs a light probe and shows per-group availability/last error
 
 Deployment (Apache mod_wsgi)
 - Ensure Python venv is available on the server and dependencies installed
@@ -95,3 +102,55 @@ If you need to refresh completely (rare):
   git rm -f pancore
   git submodule add -b main https://github.com/fettigcj/pancore.git pancore
   git commit -m "Re-add pancore submodule cleanly"
+
+
+panCheckURL CLI
+----------------
+`panCheckURL.py` is a new CLI utility that mirrors panInventory's startup flow but focuses on checking URL categories across firewalls discovered from Panorama.
+
+Key features:
+- Uses `pancore.panCore.configStart()` and `pancore.panCore.buildPano_obj()` to discover firewalls
+- Accepts a config path via `-c/--config` that points to a directory (recommended) containing one or more JSON configs, or to a single JSON file; all JSONs in the directory are used as groups
+- Distributes URL checks dynamically with retry and per-Panorama throttling; optional `--per-group` to keep groups separate
+- Honors an exclusion list of firewall serial numbers in `config/FirewallExclusionList.txt`
+- Outputs results as a table (default), CSV, or JSON. Table/CSV include columns for base/cloud primary and secondary categories and a 'disagree' flag when Base and Cloud databases differ.
+- Interactive mode when inputs are missing (great for PyCharm “Run File”): prompts to enter URLs, auto-discovers configs in `./config`, lets you select All/some, or create a new config on the spot.
+
+Examples:
+- Single config file, URLs from a text file:
+  py panCheckURL.py -c config/panCoreConfig.json --urls-file urls.txt
+
+- Config directory (contains one or more JSON files), inline URLs, JSON output:
+  py panCheckURL.py -c config --urls "example.com,https://paloaltonetworks.com" --output json
+
+- Read URLs from STDIN (PowerShell):
+  Get-Content .\urls.txt | py panCheckURL.py -c config\panCoreConfig.json --stdin
+
+- No arguments (interactive):
+  py panCheckURL.py
+  # You’ll be prompted for URLs and to pick config(s) from the ./config folder, or to create a new one.
+
+Options:
+- `-c/--config` Path to a config directory (default `./config`) or a single `panCore` JSON file. When a directory is given, all `.json` files inside are used as separate groups.
+- `--urls-file <file>` Read line-separated URLs from a file (default: `exampleList.txt` in the repo root, if present).
+- `--urls "..."` Provide URLs inline (comma or newline separated).
+- `--stdin` Read URLs from STDIN.
+- `--workers N` Max threads (default 16 or `UCC_MAX_WORKERS`).
+- `--timeout SEC` Per-request timeout (default 15 or `UCC_REQUEST_TIMEOUT`).
+- `--pan-rate N` Max API ops per Panorama/group per window (default 5 or `UCC_PAN_RATE`).
+- `--pan-window SEC` Throttling window size in seconds (default 1 or `UCC_PAN_WINDOW`).
+- `--exclude-file <path>` Path to exclusion list (default `config/FirewallExclusionList.txt`).
+- `--per-group` Process each config's firewalls separately (no flattening).
+- `--output {table,csv,json}` Select output format.
+  - JSON outputs an object: {"responses": {"<url>": {"cloudDB": {"category1": "...", "category2": "..."}, "baseDB": {"category1": "...", "category2": "..."}, "disagree": true|false}}}
+- `--interactive` Force prompts when inputs are missing (overrides auto-detection).
+- `--no-interactive` Disable prompts; exit with errors if inputs are missing.
+- `--dry-run` Print planned targets without querying.
+
+Exclusion list format:
+- File: `config/FirewallExclusionList.txt`
+- One serial number per line; `#` comments and blank lines are ignored.
+
+Troubleshooting notes:
+- If you see "no firewalls discovered", the tool now tries pancore first, then falls back to a simple `api/devices` schema inside your JSON. In interactive runs it will offer to create a new config and retry.
+- If running in PyCharm and you previously saw argparse errors from debug flags, those are now ignored. If you run with no inputs, the tool prints a clear message and/or enters interactive prompts when possible.

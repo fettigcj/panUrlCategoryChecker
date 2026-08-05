@@ -36,8 +36,14 @@
         <tr>
           <th>#</th>
           <th>URL</th>
-          <th>Category</th>
+          <th>Summary</th>
+          <th>Base cat1</th>
+          <th>Base cat2</th>
+          <th>Cloud cat1</th>
+          <th>Cloud cat2</th>
+          <th>Disagree</th>
           <th>Firewall</th>
+          <th>Group</th>
           <th>Status</th>
           <th>Raw</th>
         </tr>
@@ -48,7 +54,13 @@
           <td>{{ loop.index }}</td>
           <td class="url">{{ r.url }}</td>
           <td>{{ r.category }}</td>
+          <td>{{ r.category1_base }}</td>
+          <td>{{ r.category2_base }}</td>
+          <td>{{ r.category1_cloud }}</td>
+          <td>{{ r.category2_cloud }}</td>
+          <td>{% if r.disagree %}<span class="err">Y</span>{% else %}N{% endif %}</td>
           <td>{{ r.firewall }}</td>
+          <td>{{ r.group }}</td>
           <td>{% if r.ok %}<span class="ok">OK</span>{% else %}<span class="err">Error</span>{% endif %}</td>
           <td>
             {% if r.raw %}
