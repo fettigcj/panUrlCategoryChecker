@@ -31,6 +31,20 @@
     </article>
     {% endif %}
 
+    {% if console %}
+    <article>
+      <header>Execution console</header>
+      <details {% if not results or results|length == 0 %}open{% endif %}>
+        <summary>Show/Hide console output</summary>
+        <pre style="max-height: 300px; overflow: auto;">{{ console }}</pre>
+      </details>
+      <p class="muted">This is the captured output from the backend process (panCheckURL). Use it to diagnose why results may be empty.</p>
+    </article>
+    {% endif %}
+
+    {% if not results or results|length == 0 %}
+      <p>No results returned. Expand the console above for diagnostics.</p>
+    {% else %}
     <table role="grid">
       <thead>
         <tr>
@@ -79,6 +93,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {% endif %}
   </main>
 </body>
 </html>

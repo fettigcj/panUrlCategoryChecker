@@ -61,8 +61,8 @@ def create_app() -> Flask:
         all_cfgs = discover_configs_safe()
         if all_cfgs and len(selected) == 0:
             return render_template('results.html', results=[], errors=['No configs selected. Please choose at least one configuration.'], fw_count=len(all_cfgs), groups=[])
-        rows, errors, group_meta = run_pancheck(urls, include_configs=selected)
-        return render_template('results.html', results=rows, errors=errors, fw_count=len(discover_configs_safe()), groups=group_meta)
+        rows, errors, group_meta, console_txt = run_pancheck(urls, include_configs=selected)
+        return render_template('results.html', results=rows, errors=errors, fw_count=len(discover_configs_safe()), groups=group_meta, console=console_txt)
 
     @app.get('/config')
     def show_config():
@@ -73,7 +73,7 @@ def create_app() -> Flask:
     def availability():
         # Run a light probe against a tiny URL set to determine group availability
         probe_urls = ['example.com']
-        _rows, errors, group_meta = run_pancheck(probe_urls, per_group=True, max_workers=4, timeout=8)
+        _rows, errors, group_meta, console_txt = run_pancheck(probe_urls, per_group=True, max_workers=4, timeout=8)
         return render_template('availability.html', groups=group_meta, errors=errors)
 
     return app
@@ -135,12 +135,12 @@ def discover_configs_safe() -> List[str]:
     return sorted(files)
 
 
-def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16, timeout: int = 15, include_configs: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]: 
+def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16, timeout: int = 15, include_configs: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]], str]: 
     """Invoke panCheckURL.main in-process and capture JSON output.
-    Returns (rows_for_ui, errors, group_meta)
+    Returns (rows_for_ui, errors, group_meta, console_text)
     """
     if not ucc:
-        return [], ["panCheckURL module not available"], []
+        return [], ["panCheckURL module not available"], [], ''
     # Build argv for the CLI
     argv = [
         '-c', 'config',
@@ -155,18 +155,21 @@ def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16
             argv.extend(['--include-configs', os.path.basename(nm)])
     if per_group:
         argv.append('--per-group')
-    # Capture stdout
+    # Capture stdout and stderr
     buf = io.StringIO()
     old_stdout = sys.stdout
+    old_stderr = sys.stderr
     try:
         sys.stdout = buf
+        sys.stderr = buf
         try:
             ucc.main(argv)
-        except SystemExit as se:
+        except SystemExit:
             # Some entrypoints might raise SystemExit; ignore and use buffer
             pass
     finally:
         sys.stdout = old_stdout
+        sys.stderr = old_stderr
     txt = buf.getvalue()
     try:
         data = json.loads(txt) if txt.strip().startswith('{') else {}
@@ -216,7 +219,7 @@ def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16
         # Try to detect error text in the buffer
         if txt and not txt.strip().startswith('{'):
             errors.append(txt.strip()[:1000])
-    return rows_ui, errors, groups
+    return rows_ui, errors, groups, txt
 
 
 # ========== URL processing and checks ==========
