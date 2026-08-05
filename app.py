@@ -171,10 +171,27 @@ def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16
         sys.stdout = old_stdout
         sys.stderr = old_stderr
     txt = buf.getvalue()
-    try:
-        data = json.loads(txt) if txt.strip().startswith('{') else {}
-    except Exception:
-        data = {}
+
+    # Try to parse JSON even if mixed with console noise (stderr/stdout preface)
+    def _parse_mixed_json(s: str) -> Dict[str, Any]:
+        s1 = (s or '').strip()
+        if s1.startswith('{'):
+            try:
+                return json.loads(s1)
+            except Exception:
+                pass
+        # Attempt to extract a JSON object substring
+        try:
+            i = s.find('{')
+            j = s.rfind('}')
+            if i != -1 and j != -1 and j > i:
+                chunk = s[i:j+1]
+                return json.loads(chunk)
+        except Exception:
+            pass
+        return {}
+
+    data = _parse_mixed_json(txt)
     # Parse results
     rows_ui: List[Dict[str, Any]] = []
     errors: List[str] = []
