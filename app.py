@@ -3,7 +3,7 @@ import sys
 import io
 import json
 import xml.etree.ElementTree as ET
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- Ensure Flask is importable; if not, try to re-exec using the repo's local venv ---
@@ -135,7 +135,7 @@ def discover_configs_safe() -> List[str]:
     return sorted(files)
 
 
-def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16, timeout: int = 15, include_configs: List[str] | None = None) -> tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]: 
+def run_pancheck(urls: List[str], per_group: bool = False, max_workers: int = 16, timeout: int = 15, include_configs: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]: 
     """Invoke panCheckURL.main in-process and capture JSON output.
     Returns (rows_for_ui, errors, group_meta)
     """
@@ -232,7 +232,7 @@ def normalize_urls(text_block: str) -> List[str]:
     - De-duplicate while preserving order (case-insensitive comparison).
     """
     urls: List[str] = []
-    seen_ci: set[str] = set()
+    seen_ci: Set[str] = set()
     for raw in text_block.splitlines():
         s = (raw or '').strip()
         if not s:
