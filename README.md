@@ -68,6 +68,16 @@ Setup
 
 Deployment (Apache mod_wsgi)
 - Ensure Python venv is available on the server and dependencies installed
+- IMPORTANT: Initialize/update the pancore submodule on the server after clone/pull:
+
+    git submodule update --init --recursive
+
+  If pancore was deinitialized earlier, you may need:
+
+    git submodule deinit -f pancore
+    git checkout -- pancore
+    git submodule update --init --recursive
+
 - Point WSGIScriptAlias to the wsgi.py file in this repo
 
   Example httpd.conf snippet:
@@ -77,7 +87,8 @@ Deployment (Apache mod_wsgi)
       Require all granted
   </Directory>
 
-Notes
+Troubleshooting
+- pancore folder is empty on the server: run the submodule init/update commands above. You must perform this on each server after cloning or when deploying updates that move the submodule pointer.
 - The app attempts to parse categories from the op command response using a best-effort XML parser. Adjust parsing if your PAN-OS version returns a different structure.
 - Set UCC_MAX_WORKERS and UCC_REQUEST_TIMEOUT env vars to tune concurrency and timeouts.
 - If pancore is published to PyPI or a private index, you may uninstall the submodule and depend on the package instead.

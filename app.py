@@ -47,7 +47,39 @@ def create_app() -> Flask:
     def index():
         # Count configs and pass list to allow selection on the form
         cfgs = discover_configs_safe()
-        return render_template('index.html', fw_count=len(cfgs), cfg_path='config', cfg_exists=bool(cfgs), configs=cfgs)
+        # Detect pancore availability so we can guide users on servers where the submodule wasn't pulled
+        def _pancore_status() -> Tuple[bool, str]:
+            base = os.path.dirname(__file__)
+            pdir = os.path.join(base, 'pancore')
+            has_dir = os.path.isdir(pdir)
+            has_py = False
+            if has_dir:
+                try:
+                    for name in os.listdir(pdir):
+                        if name.lower().endswith('.py'):
+                            has_py = True
+                            break
+                except Exception:
+                    has_py = False
+            try:
+                from pancore import panCore as _pc  # type: ignore
+                imported = True
+            except Exception:
+                imported = False
+            ok = has_dir and has_py and imported
+            msg = ''
+            if not ok:
+                msg = (
+                    'pancore package is missing or empty. If this repository was cloned on this server, run:\n'
+                    '  git submodule update --init --recursive\n'
+                    'If pancore was deinitialized, you may need:\n'
+                    '  git submodule deinit -f pancore\n'
+                    '  git checkout -- pancore\n'
+                    '  git submodule update --init --recursive\n'
+                )
+            return ok, msg
+        pc_ok, pc_msg = _pancore_status()
+        return render_template('index.html', fw_count=len(cfgs), cfg_path='config', cfg_exists=bool(cfgs), configs=cfgs, pancore_ok=pc_ok, pancore_msg=pc_msg)
 
     @app.post('/check')
     def check():
