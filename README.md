@@ -152,5 +152,8 @@ Exclusion list format:
 - One serial number per line; `#` comments and blank lines are ignored.
 
 Troubleshooting notes:
-- If you see "no firewalls discovered", the tool now tries pancore first, then falls back to a simple `api/devices` schema inside your JSON. In interactive runs it will offer to create a new config and retry.
+- Use `--debug` (repeat up to 3 times) to see detailed discovery steps from pancore, including which config files were used, the Panorama address detected, whether `ping` to Panorama succeeded, and the result of `buildPano_obj` (firewall counts). Example:
+  `py panCheckURL.py -c config --urls cnn.com --debug --debug`
+- Add `--no-fallback` to disable the local JSON schema fallback so you can isolate pancore behavior.
+- If you see "no firewalls discovered", the tool tries pancore first, then (unless `--no-fallback` is set) falls back to a simple `api/devices` schema inside your JSON. In interactive runs it will offer to create a new config and retry.
 - If running in PyCharm and you previously saw argparse errors from debug flags, those are now ignored. If you run with no inputs, the tool prints a clear message and/or enters interactive prompts when possible.

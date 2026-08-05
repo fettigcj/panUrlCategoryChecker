@@ -27,6 +27,18 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 import time
 from collections import deque
+import traceback as _traceback
+
+# Debug verbosity level (0=off). Set in main() from --debug.
+DEBUG: int = 0
+
+def dbg(level: int, *args: Any) -> None:
+    """Print debug messages to stderr when DEBUG >= level."""
+    try:
+        if DEBUG >= level:
+            print("[DEBUG]", *args, file=sys.stderr)
+    except Exception:
+        pass
 
 # Optional pancore import from submodule/package
 try:
@@ -152,27 +164,46 @@ def build_groups(config_files: List[str]) -> List[List[Any]]:
     """
     groups: List[List[Any]] = []
     if panCore is None:
+        dbg(1, "pancore not available; build_groups returns empty")
         return groups
     for cfg in config_files:
+        dbg(1, f"build_groups: using config {cfg}")
         try:
             panCore.configStart(headless=True, configStorage=cfg)
             pano_addr = getattr(panCore, 'panAddress', None)
             pan_user = getattr(panCore, 'panUser', 'optional')
             pan_pass = getattr(panCore, 'panPass', 'optional')
             pan_key = getattr(panCore, 'panKey', 'optional')
+            dbg(1, f"configStart set panAddress={pano_addr!r} user={pan_user!r} has_key={(pan_key!='optional')}")
+            # First step pancore does: ping Panorama
+            try:
+                ping_ok = bool(panCore.pingit(pano_addr)) if pano_addr else False
+            except Exception as e:
+                ping_ok = False
+                if DEBUG >= 2:
+                    print("[DEBUG] pingit error:", e, file=sys.stderr)
+                    _traceback.print_exc()
+            dbg(1, f"ping Panorama {pano_addr}: {'OK' if ping_ok else 'FAILED'}")
             tup = panCore.buildPano_obj(panAddress=pano_addr, panUser=pan_user, panPass=pan_pass, panKey=pan_key)
             if isinstance(tup, tuple) and len(tup) >= 3:
                 _pano_obj, _dgs, firewalls, *_rest = tup
+                count = len(firewalls) if isinstance(firewalls, list) else 0
+                dbg(1, f"buildPano_obj returned {count} firewall(s)")
                 if isinstance(firewalls, list):
                     groups.append(firewalls)
                 else:
                     groups.append([])
             else:
+                dbg(1, "buildPano_obj did not return expected tuple; treating as empty")
                 groups.append([])
         except SystemExit:
             # pancore may sys.exit() on certain errors; treat as empty group
+            dbg(1, "pancore raised SystemExit during build; treating as empty group")
             groups.append([])
-        except Exception:
+        except Exception as e:
+            dbg(1, f"Exception in build_groups for {cfg}: {e}")
+            if DEBUG >= 2:
+                _traceback.print_exc()
             groups.append([])
     return groups
 
@@ -356,6 +387,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument('--pan-window', type=int, default=int(os.environ.get('UCC_PAN_WINDOW', '1')), help='Window size in seconds for --pan-rate (default from UCC_PAN_WINDOW or 1)')
     # Filter specific config files by basename (when -c points to a directory)
     p.add_argument('--include-configs', action='append', help='Limit to these config JSON basenames (repeat or comma-separate). Applies when --config is a directory.')
+    # Troubleshooting flags
+    p.add_argument('--debug', action='count', default=0, help='Increase debug output for troubleshooting pancore discovery (repeat for more detail)')
+    p.add_argument('--no-fallback', action='store_true', help='Disable local JSON schema fallback; use only pancore discovery')
     # Parse known args and ignore the rest (e.g., any IDE/debugger flags)
     args, unknown = p.parse_known_args(argv)
     # Normalize include-configs list
@@ -376,10 +410,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         pass
     if unknown and getattr(args, 'verbose', 0):
         print(f"Warning: ignoring unknown args: {' '.join(unknown)}", file=sys.stderr)
+    # Set global DEBUG level
+    global DEBUG
+    try:
+        DEBUG = int(getattr(args, 'debug', 0) or 0)
+    except Exception:
+        DEBUG = 0
+    dbg(1, "args parsed; DEBUG=", DEBUG)
     return args
 
 
 def discover_configs(config_path: Optional[str]) -> List[str]:
+    dbg(1, "discover_configs: input=", config_path)
     """Resolve a single --config argument into a list of JSON config file paths.
     - If config_path is a directory (recommended), return all .json files inside (sorted,
       preferring panCoreConfig.json first if present).
@@ -387,19 +429,24 @@ def discover_configs(config_path: Optional[str]) -> List[str]:
     - If None/empty, default to ./config directory next to this script and list .json files there.
     """
     path = _resolve_candidate(config_path) if config_path else _resolve_candidate('config')
+    dbg(1, "discover_configs: resolved path=", path)
     files: List[str] = []
     if os.path.isdir(path):
         try:
             for name in os.listdir(path):
                 if name.lower().endswith('.json'):
                     files.append(os.path.join(path, name))
-        except Exception:
+        except Exception as e:
+            dbg(1, f"discover_configs: error listing {path}: {e}")
             files = []
         # Prefer canonical name first
         files = sorted(files, key=lambda p: (0 if os.path.basename(p) == 'panCoreConfig.json' else 1, p.lower()))
+        dbg(1, f"discover_configs: found {len(files)} json file(s)")
         return files
     # Not a dir: treat as a single file
-    return [path] if path else []
+    out = [path] if path else []
+    dbg(1, "discover_configs: single file list=", out)
+    return out
 
 
 def read_urls_from_sources(args: argparse.Namespace) -> List[str]:
@@ -652,7 +699,9 @@ def print_table(rows: List[Dict[str, Any]]) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
 
+    dbg(1, "main: starting with args", vars(args))
     urls = read_urls_from_sources(args)
+    dbg(1, f"main: total URLs after normalization = {len(urls)}")
 
     # Interactive URL prompt if needed
     interactive = is_interactive_session(args)
@@ -668,10 +717,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Resolve configs: if none specified, discover and possibly prompt
     cfgs = discover_configs(args.config)
+    dbg(1, f"main: discovered {len(cfgs)} config file(s): {cfgs}")
     # Optional filtering by --include-configs (only applies cleanly when --config is a directory)
     inc_set = getattr(args, '_include_configs_set', set())
     if inc_set:
         cfgs = [p for p in cfgs if os.path.basename(p) in inc_set]
+        dbg(1, f"main: filtered by --include-configs -> {len(cfgs)} file(s): {cfgs}")
     # If discover_configs returned only the default path but it doesn't exist, treat as empty in interactive mode
     if interactive and (not args.config):
         # Offer choices from ./config
@@ -679,16 +730,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         if cands:
             print("No -c/--config provided. Discovered the following configs in ./config. Choose which to use:")
         cfgs = prompt_select_configs(cands)
+        dbg(1, f"main: after interactive selection -> {len(cfgs)} file(s): {cfgs}")
     # If still empty and not interactive, keep cfgs as is (may be single default path)
 
     # Build groups via pancore first
     groups = build_groups(cfgs)
+    dbg(1, "main: pancore group sizes:", [len(g) for g in groups] if groups else [])
 
     # If pancore yielded no firewalls, try local schema fallback for each config
     if (not groups or all(len(g) == 0 for g in groups)) and cfgs:
-        if interactive:
-            print("No firewalls discovered via pancore; trying local JSON schema (api/devices) fallback...")
-        groups = build_groups_from_local_schema(cfgs)
+        if getattr(args, 'no_fallback', False):
+            dbg(1, "main: --no-fallback set; skipping local schema fallback")
+        else:
+            if interactive:
+                print("No firewalls discovered via pancore; trying local JSON schema (api/devices) fallback...")
+            dbg(1, "main: attempting local JSON schema fallback")
+            groups = build_groups_from_local_schema(cfgs)
+            dbg(1, "main: fallback group sizes:", [len(g) for g in groups] if groups else [])
 
     if not groups or all(len(g) == 0 for g in groups):
         if interactive:
